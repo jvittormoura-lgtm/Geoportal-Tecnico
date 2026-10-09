@@ -1,0 +1,8 @@
+{
+  "name": "Remix GeoGRAPROHAB SP",
+  "description": "Geoportal de inteligência geográfica do GRAPROHAB para consulta interna e análise técnica de processos habitacionais do Estado de São Paulo.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}
