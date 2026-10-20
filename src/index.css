@@ -80,14 +80,15 @@
 }
 
 /* Crucial safeguard: ensure SVG overlay panes never intercept clicks meant for Canvas vector layers */
+.leaflet-overlay-pane svg,
+.leaflet-overlay-pane svg * {
+  pointer-events: none !important;
+}
 .leaflet-pane > svg {
   pointer-events: none !important;
 }
 .leaflet-pane > svg path {
   pointer-events: none !important;
-}
-.leaflet-pane > svg path.leaflet-interactive {
-  pointer-events: auto !important;
 }
 
 /* Light Theme Popup Overrides */

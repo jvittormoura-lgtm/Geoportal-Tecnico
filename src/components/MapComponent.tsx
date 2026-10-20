@@ -163,6 +163,8 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
   const prevLayerOrderRef = useRef<string>('');
   const canvasRendererRef = useRef<L.Canvas | null>(null);
   const highlightLayerRef = useRef<L.GeoJSON | null>(null);
+  const addressMarkerRef = useRef<L.Layer | null>(null);
+  const addressMarkerTimeoutRef = useRef<any>(null);
   const clickedFromMapRef = useRef<number>(0);
   const scaleControlRef = useRef<L.Control.Scale | null>(null);
   const zoomControlRef = useRef<L.Control.Zoom | null>(null);
@@ -209,6 +211,10 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
     // Clean any orphaned DOM controls or elements inside container
     mapContainerRef.current.innerHTML = '';
 
+    // Shared hardware-accelerated canvas renderer with padding to prevent edge re-draws during pan
+    const sharedCanvas = L.canvas({ padding: 0.5, tolerance: 6 });
+    canvasRendererRef.current = sharedCanvas;
+
     const map = L.map(mapContainerRef.current, {
       center: [-22.3, -49.0], // Estado de São Paulo center
       zoom: 7,
@@ -217,13 +223,12 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       wheelPxPerZoomLevel: 80,
       zoomControl: false,
       attributionControl: true,
-      preferCanvas: true // GPU-accelerated canvas for vector layers
+      preferCanvas: true, // GPU-accelerated canvas for vector layers
+      renderer: sharedCanvas // Guarantees all Leaflet paths default to this single shared canvas
     });
+    (map as any)._renderer = sharedCanvas;
 
     map.attributionControl.setPrefix('<b style="color: #3b82f6;">GRAPROHAB</b> | <a href="https://leafletjs.com" target="_blank">Leaflet</a>');
-
-    // Shared canvas renderer with padding to prevent edge re-draws during pan
-    canvasRendererRef.current = L.canvas({ padding: 0.5, tolerance: 6 });
 
     // Custom zoom control in bottom-right
     zoomControlRef.current = L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -670,8 +675,8 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
             // Timestamp that click originated on the map to prevent flyToBounds from dismissing the popup
             clickedFromMapRef.current = Date.now();
 
-            // Explicitly trigger openPopup at click latlng if not already open
-            if (e && e.latlng && leafletLayer.openPopup && !leafletLayer.isPopupOpen()) {
+            // Explicitly ensure openPopup is displayed at click latlng
+            if (e && e.latlng && typeof leafletLayer.openPopup === 'function') {
               leafletLayer.openPopup(e.latlng);
             }
 
@@ -778,6 +783,7 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
         const { latitude, longitude } = pos.coords;
         mapInstanceRef.current?.flyTo([latitude, longitude], 13, { duration: 1.5 });
         L.circleMarker([latitude, longitude], {
+          renderer: canvasRendererRef.current || undefined,
           radius: 10,
           fillColor: '#38bdf8',
           color: '#ffffff',
@@ -921,16 +927,37 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
     
     if (currentPoints?.length > 0) {
       if (currentPoints?.length > 1) {
-        L.polyline(currentPoints, { color: '#f43f5e', weight: 3, dashArray: '5, 5' }).addTo(group);
+        L.polyline(currentPoints, { 
+          renderer: canvasRendererRef.current || undefined, 
+          interactive: false,
+          color: '#f43f5e', 
+          weight: 3, 
+          dashArray: '5, 5' 
+        }).addTo(group);
       }
       
       const polyPts = measureMouse ? [...measurePoints, measureMouse] : [...measurePoints];
       if (polyPts?.length > 2) {
-        L.polygon(polyPts, { color: '#f43f5e', weight: 0, fillColor: '#f43f5e', fillOpacity: 0.2 }).addTo(group);
+        L.polygon(polyPts, { 
+          renderer: canvasRendererRef.current || undefined, 
+          interactive: false,
+          color: '#f43f5e', 
+          weight: 0, 
+          fillColor: '#f43f5e', 
+          fillOpacity: 0.2 
+        }).addTo(group);
       }
       
       measurePoints.forEach(pt => {
-        L.circleMarker(pt, { radius: 5, color: '#f43f5e', fillColor: '#fff', weight: 2, fillOpacity: 1 }).addTo(group);
+        L.circleMarker(pt, { 
+          renderer: canvasRendererRef.current || undefined, 
+          interactive: false,
+          radius: 5, 
+          color: '#f43f5e', 
+          fillColor: '#fff', 
+          weight: 2, 
+          fillOpacity: 1 
+        }).addTo(group);
       });
       
       let dist = 0;
@@ -954,6 +981,16 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
     
+    // Clear any previous address marker
+    if (addressMarkerTimeoutRef.current) {
+      clearTimeout(addressMarkerTimeoutRef.current);
+      addressMarkerTimeoutRef.current = null;
+    }
+    if (addressMarkerRef.current && map.hasLayer(addressMarkerRef.current)) {
+      map.removeLayer(addressMarkerRef.current);
+      addressMarkerRef.current = null;
+    }
+
     if (bbox) {
       map.flyToBounds([
         [bbox[0], bbox[2]],
@@ -963,20 +1000,25 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       map.flyTo([lat, lon], 16, { duration: 1.5 });
     }
     
-    // Add a temporary marker
+    // Add a temporary visual indicator (MUST be non-interactive to never block clicks to vector layers)
     const marker = L.circleMarker([lat, lon], {
-      radius: 8,
+      renderer: canvasRendererRef.current || undefined,
+      interactive: false,
+      radius: 9,
       fillColor: '#f43f5e',
       color: '#ffffff',
-      weight: 2,
-      fillOpacity: 1
+      weight: 3,
+      fillOpacity: 0.95
     }).addTo(map);
+
+    addressMarkerRef.current = marker;
     
-    setTimeout(() => {
-      if (mapInstanceRef.current && mapInstanceRef.current.hasLayer(marker)) {
-        mapInstanceRef.current.removeLayer(marker);
+    addressMarkerTimeoutRef.current = setTimeout(() => {
+      if (mapInstanceRef.current && addressMarkerRef.current && mapInstanceRef.current.hasLayer(addressMarkerRef.current)) {
+        mapInstanceRef.current.removeLayer(addressMarkerRef.current);
+        addressMarkerRef.current = null;
       }
-    }, 5000);
+    }, 6000);
   };
 
   return (

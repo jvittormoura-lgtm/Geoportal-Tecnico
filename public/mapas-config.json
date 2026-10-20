@@ -89,7 +89,7 @@
         "strokeOpacity": 0.9,
         "pointRadius": 7,
         "pointShape": "circle",
-        "smoothFactor": 2.5
+        "smoothFactor": 1.5
       }
     },
     {
