@@ -19,6 +19,7 @@ import {
 import * as turf from '@turf/turf';
 
 import { MapToolbar } from './MapToolbar';
+import { CoordinateParseResult } from '../utils/coordinateParser';
 
 
 interface MapComponentProps {
@@ -165,6 +166,7 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
   const highlightLayerRef = useRef<L.GeoJSON | null>(null);
   const addressMarkerRef = useRef<L.Layer | null>(null);
   const addressMarkerTimeoutRef = useRef<any>(null);
+  const geodeticLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const clickedFromMapRef = useRef<number>(0);
   const scaleControlRef = useRef<L.Control.Scale | null>(null);
   const zoomControlRef = useRef<L.Control.Zoom | null>(null);
@@ -407,12 +409,35 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       }
     };
 
+    (window as any).__gis_copy_text = (text: string, label?: string) => {
+      try {
+        navigator.clipboard.writeText(text);
+        const notice = document.createElement('div');
+        notice.innerText = '✓ Coordenada copiada!';
+        notice.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:8px 16px;border-radius:9999px;font-size:12px;font-weight:600;z-index:99999;box-shadow:0 10px 25px rgba(0,0,0,0.5);';
+        document.body.appendChild(notice);
+        setTimeout(() => notice.remove(), 2000);
+      } catch (e) {
+        console.error('Error copying text:', e);
+      }
+    };
+
+    (window as any).__gis_remove_geodetic_marker = () => {
+      const map = mapInstanceRef.current;
+      if (map && geodeticLayerGroupRef.current && map.hasLayer(geodeticLayerGroupRef.current)) {
+        map.removeLayer(geodeticLayerGroupRef.current);
+        geodeticLayerGroupRef.current = null;
+      }
+    };
+
     return () => {
       delete (window as any).__gis_open_detail;
       delete (window as any).__gis_open_feature_inspector;
       delete (window as any).__gis_open_field_manager;
       delete (window as any).__gis_open_attr_table;
       delete (window as any).__gis_copy_props;
+      delete (window as any).__gis_copy_text;
+      delete (window as any).__gis_remove_geodetic_marker;
     };
   }, []);
 
@@ -1021,6 +1046,152 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
     }, 6000);
   };
 
+  const handleLocateCoordinate = useCallback((result: CoordinateParseResult) => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Clean up any existing geodetic marker group
+    if (geodeticLayerGroupRef.current && map.hasLayer(geodeticLayerGroupRef.current)) {
+      map.removeLayer(geodeticLayerGroupRef.current);
+      geodeticLayerGroupRef.current = null;
+    }
+
+    const group = L.layerGroup();
+
+    // 1. Concentric radius circle: 40 meters (typical gleba/lote parcel scale)
+    // Non-interactive so clicks pass through to vector layers
+    L.circle([result.lat, result.lng], {
+      renderer: canvasRendererRef.current || undefined,
+      interactive: false,
+      radius: 40,
+      color: '#ef4444',
+      weight: 2,
+      dashArray: '5, 5',
+      fillColor: '#ef4444',
+      fillOpacity: 0.12
+    }).addTo(group);
+
+    // 2. Pulse radar ring (outer ring)
+    L.circleMarker([result.lat, result.lng], {
+      renderer: canvasRendererRef.current || undefined,
+      interactive: false,
+      radius: 18,
+      color: '#f87171',
+      weight: 1.5,
+      fillColor: '#f87171',
+      fillOpacity: 0.25
+    }).addTo(group);
+
+    // 3. Focal pin (Center crosshair point)
+    const focalPoint = L.circleMarker([result.lat, result.lng], {
+      renderer: canvasRendererRef.current || undefined,
+      radius: 9,
+      fillColor: '#dc2626',
+      color: '#ffffff',
+      weight: 3,
+      fillOpacity: 1
+    }).addTo(group);
+
+    // Build rich multi-format geodetic popup (Red and White Theme)
+    const popupHtml = `
+      <div style="font-family: 'Plus Jakarta Sans', system-ui, sans-serif; min-width: 310px; max-width: 360px; color: #1e293b; padding: 2px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #dc2626;"></span>
+            <span style="font-size: 11px; font-weight: 800; color: #991b1b; text-transform: uppercase; letter-spacing: 0.05em;">Coordenada Localizada</span>
+          </div>
+          <span style="font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca;">
+            ${result.format}
+          </span>
+        </div>
+
+        <div style="font-size: 12px; font-weight: 700; color: #0f172a; margin-bottom: ${result.zoneReason ? '2px' : '8px'}; padding-bottom: 4px; border-bottom: 2px solid #ef4444;">
+          ${result.detectedType}
+        </div>
+        ${result.zoneReason ? `
+          <div style="font-size: 10px; font-weight: 600; color: #dc2626; margin-bottom: 8px;">
+            ⚡ ${result.zoneReason}
+          </div>
+        ` : ''}
+
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11px;">
+          <!-- UTM -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+              <span style="font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase;">UTM SIRGAS 2000 (${result.formatted.utmZone})</span>
+              <button onclick="window.__gis_copy_text('${result.formatted.utm}', 'utm')" style="font-size: 9px; font-weight: 700; color: #dc2626; background: none; border: none; cursor: pointer; padding: 0;">Copiar</button>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #0f172a;">
+              ${result.formatted.utm}
+            </div>
+          </div>
+
+          <!-- GMS -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+              <span style="font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase;">Graus-Minutos-Segundos (GMS)</span>
+              <button onclick="window.__gis_copy_text('${result.formatted.gms}', 'gms')" style="font-size: 9px; font-weight: 700; color: #dc2626; background: none; border: none; cursor: pointer; padding: 0;">Copiar</button>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #0f172a;">
+              ${result.formatted.gms}
+            </div>
+          </div>
+
+          <!-- Decimal -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+              <span style="font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase;">Graus Decimais (DD)</span>
+              <button onclick="window.__gis_copy_text('${result.formatted.dd}', 'dd')" style="font-size: 9px; font-weight: 700; color: #dc2626; background: none; border: none; cursor: pointer; padding: 0;">Copiar</button>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; color: #0f172a;">
+              ${result.formatted.dd}
+            </div>
+          </div>
+        </div>
+
+        ${result.warning ? `
+          <div style="margin-top: 6px; padding: 4px 8px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; font-size: 10px; color: #b45309; display: flex; align-items: center; gap: 4px;">
+            <span>⚠️</span> <span>${result.warning}</span>
+          </div>
+        ` : ''}
+
+        <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #e2e8f0; display: flex; gap: 6px;">
+          <button onclick="window.__gis_copy_text('${result.formatted.dd} | ${result.formatted.utm} | ${result.formatted.gms}', 'all')" style="flex: 1; padding: 5px 8px; background: #dc2626; color: #ffffff; border: none; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; text-align: center;">
+            📋 Copiar Todas
+          </button>
+          <button onclick="window.__gis_remove_geodetic_marker()" style="padding: 5px 8px; background: #ffffff; color: #ef4444; border: 1px solid #fecaca; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; text-align: center;">
+            ✕ Remover
+          </button>
+        </div>
+      </div>
+    `;
+
+    focalPoint.bindPopup(popupHtml, {
+      className: 'custom-gis-popup',
+      autoPan: true,
+      autoPanPadding: [40, 40],
+      minWidth: 320
+    });
+
+    group.addTo(map);
+    geodeticLayerGroupRef.current = group;
+
+    // Fly to position at cadastral zoom level 17
+    map.flyTo([result.lat, result.lng], 17, { duration: 1.5 });
+
+    // Open popup upon camera arrival
+    setTimeout(() => {
+      focalPoint.openPopup();
+    }, 1200);
+  }, []);
+
+  const handleGetMapCenter = useCallback(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return null;
+    const center = map.getCenter();
+    return { lat: center.lat, lng: center.lng };
+  }, []);
+
   return (
     <div className="relative w-full h-full overflow-hidden bg-slate-50">
       {/* Leaflet DOM container */}
@@ -1028,6 +1199,8 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
 
       <MapToolbar 
         onFlyTo={handleAddressFlyTo}
+        onLocateCoordinate={handleLocateCoordinate}
+        getMapCenter={handleGetMapCenter}
         activeBasemap={activeBasemap}
         onSelectBasemap={onSelectBasemap}
         onLocateMe={handleLocateMe}

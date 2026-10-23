@@ -1,11 +1,15 @@
 import React from 'react';
 import { Compass, MapPin, Ruler } from 'lucide-react';
 import { AddressSearch } from './AddressSearch';
+import { CoordinateSearch } from './CoordinateSearch';
 import { BasemapDropdown } from './BasemapDropdown';
 import { BasemapOption } from '../types/gis';
+import { CoordinateParseResult } from '../utils/coordinateParser';
 
 interface MapToolbarProps {
   onFlyTo: (lat: number, lon: number, bbox?: [number, number, number, number]) => void;
+  onLocateCoordinate: (result: CoordinateParseResult) => void;
+  getMapCenter?: () => { lat: number; lng: number } | null;
   activeBasemap: BasemapOption;
   onSelectBasemap: (basemap: BasemapOption) => void;
   onLocateMe: () => void;
@@ -16,6 +20,8 @@ interface MapToolbarProps {
 
 export const MapToolbar: React.FC<MapToolbarProps> = ({
   onFlyTo,
+  onLocateCoordinate,
+  getMapCenter,
   activeBasemap,
   onSelectBasemap,
   onLocateMe,
@@ -26,6 +32,7 @@ export const MapToolbar: React.FC<MapToolbarProps> = ({
   return (
     <div className="absolute top-3 left-3 z-[1000] flex flex-col items-center gap-1.5 p-1.5 bg-white/90 border border-slate-300/80 rounded-xl shadow-xl backdrop-blur-xs">
       <AddressSearch onFlyTo={onFlyTo} />
+      <CoordinateSearch onLocateCoordinate={onLocateCoordinate} getMapCenter={getMapCenter} />
       <BasemapDropdown currentBasemap={activeBasemap} onSelectBasemap={onSelectBasemap} />
       
       <div className="w-8 h-px bg-slate-200 my-0.5" />
