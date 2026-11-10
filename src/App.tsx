@@ -173,7 +173,7 @@ export default function App() {
   const createLayerFromGeoJson = useCallback((
     name: string,
     geojson: GeoJSON.FeatureCollection,
-    options?: { isRealtime?: boolean; realtimeUrl?: string }
+    options?: { isRealtime?: boolean; realtimeUrl?: string; ignoreGlobalFilters?: boolean }
   ): GisLayer => {
     // Automatically normalize and reproject coordinates (WGS84, UTM 23S/22S, Web Mercator, inverted)
     const { geojson: normalizedGeojson, reprojected, detectedCrs } = normalizeAndReprojectGeoJson(geojson);
@@ -238,7 +238,8 @@ export default function App() {
       bbox,
       createdAt: Date.now(),
       isRealtime: options?.isRealtime,
-      realtimeUrl: options?.realtimeUrl
+      realtimeUrl: options?.realtimeUrl,
+      ignoreGlobalFilters: Boolean(options?.ignoreGlobalFilters)
     };
   }, [layers?.length]);
 
@@ -721,7 +722,7 @@ export default function App() {
     applyStandardizedLayerUpdate(id, updatedGeojson, standardSchema);
   };
 
-  const handleLoadGeoJsonFile = async (file: File) => {
+  const handleLoadGeoJsonFile = async (file: File, options?: { ignoreGlobalFilters?: boolean }) => {
     try {
       const text = await file.text();
       let geojson: GeoJSON.FeatureCollection;
@@ -769,35 +770,39 @@ export default function App() {
       }
 
       const layerName = file.name.replace(/\.[^/.]+$/, '');
-      const newLayer = createLayerFromGeoJson(layerName, geojson);
+      const newLayer = createLayerFromGeoJson(layerName, geojson, {
+        ignoreGlobalFilters: options?.ignoreGlobalFilters
+      });
       
-      // Inherit global search filters if active
-      const dynamicFilters: AttributeFilter[] = [];
-      if (consumerMunicipio.trim()) {
-        dynamicFilters.push({ id: 'search_mun', property: '*', type: 'string', operator: 'match_municipio', value: consumerMunicipio.trim(), active: true });
-      }
-      if (consumerEmpreendedor.trim()) {
-        dynamicFilters.push({ id: 'search_emp', property: '*', type: 'string', operator: 'match_empreendedor', value: consumerEmpreendedor.trim(), active: true });
-      }
-      if (consumerProtocolo.trim()) {
-        dynamicFilters.push({ id: 'search_prot', property: '*', type: 'string', operator: 'match_protocolo', value: consumerProtocolo.trim(), active: true });
-      }
-      if (consumerDispensa.trim()) {
-        dynamicFilters.push({ id: 'search_disp', property: '*', type: 'string', operator: 'match_dispensa', value: consumerDispensa.trim(), active: true });
-      }
-      if (consumerSituacao.trim()) {
-        dynamicFilters.push({ id: 'search_sit', property: '*', type: 'string', operator: 'match_situacao', value: consumerSituacao.trim(), active: true });
-      }
-      if (consumerTipoEmpreendimento.trim()) {
-        dynamicFilters.push({ id: 'search_tipo_emp', property: 'Base_Tipo de empreendimento', type: 'string', operator: 'match_tipo_empreendimento', value: consumerTipoEmpreendimento.trim(), active: true });
-      }
-      if (consumerAnoRange) {
-        dynamicFilters.push({ id: 'search_ano', property: '*', type: 'number', operator: 'match_ano_entrada', value: consumerAnoRange, active: true });
-      }
+      // Inherit global search filters only if layer is part of global filter
+      if (!newLayer.ignoreGlobalFilters) {
+        const dynamicFilters: AttributeFilter[] = [];
+        if (consumerMunicipio.trim()) {
+          dynamicFilters.push({ id: 'search_mun', property: '*', type: 'string', operator: 'match_municipio', value: consumerMunicipio.trim(), active: true });
+        }
+        if (consumerEmpreendedor.trim()) {
+          dynamicFilters.push({ id: 'search_emp', property: '*', type: 'string', operator: 'match_empreendedor', value: consumerEmpreendedor.trim(), active: true });
+        }
+        if (consumerProtocolo.trim()) {
+          dynamicFilters.push({ id: 'search_prot', property: '*', type: 'string', operator: 'match_protocolo', value: consumerProtocolo.trim(), active: true });
+        }
+        if (consumerDispensa.trim()) {
+          dynamicFilters.push({ id: 'search_disp', property: '*', type: 'string', operator: 'match_dispensa', value: consumerDispensa.trim(), active: true });
+        }
+        if (consumerSituacao.trim()) {
+          dynamicFilters.push({ id: 'search_sit', property: '*', type: 'string', operator: 'match_situacao', value: consumerSituacao.trim(), active: true });
+        }
+        if (consumerTipoEmpreendimento.trim()) {
+          dynamicFilters.push({ id: 'search_tipo_emp', property: 'Base_Tipo de empreendimento', type: 'string', operator: 'match_tipo_empreendimento', value: consumerTipoEmpreendimento.trim(), active: true });
+        }
+        if (consumerAnoRange) {
+          dynamicFilters.push({ id: 'search_ano', property: '*', type: 'number', operator: 'match_ano_entrada', value: consumerAnoRange, active: true });
+        }
 
-      if (dynamicFilters?.length > 0) {
-        newLayer.filters = dynamicFilters;
-        newLayer.filteredCount = filterFeatures(newLayer.data.features, newLayer.filters)?.length || 0;
+        if (dynamicFilters?.length > 0) {
+          newLayer.filters = dynamicFilters;
+          newLayer.filteredCount = filterFeatures(newLayer.data.features, newLayer.filters)?.length || 0;
+        }
       }
 
       setLayers(prev => {
@@ -807,7 +812,11 @@ export default function App() {
       });
       setPublishedLayers(prev => [newLayer, ...prev]);
       setActiveLayerId(newLayer.id);
-      showToast(`Camada "${layerName}" carregada com sucesso (${newLayer.featureCount} polígonos/feições)!`);
+      showToast(
+        newLayer.ignoreGlobalFilters
+          ? `Camada de sobreposição "${layerName}" carregada (${newLayer.featureCount} feições, isenta do filtro global)!`
+          : `Camada "${layerName}" carregada com sucesso (${newLayer.featureCount} polígonos/feições)!`
+      );
     } catch (err: any) {
       console.error('Erro ao ler arquivo:', err);
       showToast(err.message || 'Falha ao processar arquivo GeoJSON.', 'error');
@@ -988,6 +997,9 @@ export default function App() {
     let totalMatchedFeatures = 0;
 
     const applyUpdate = (prev: GisLayer[]) => prev.map(l => {
+      if (layerId === 'GLOBAL' && l.ignoreGlobalFilters) {
+        return l;
+      }
       if (layerId === 'GLOBAL' || l.id === layerId) {
         const quickFilters = l.filters?.filter(f => {
           if (!f.id.startsWith('search_')) return false;
@@ -1055,6 +1067,9 @@ export default function App() {
 
     const applyFiltersToLayers = (prev: GisLayer[]) => {
       const newLayers = prev.map(l => {
+        if (l.ignoreGlobalFilters) {
+          return l;
+        }
         // 1. Keep any existing manual filters that are NOT from the quick search bar
         const existingFilters = l.filters?.filter(f => !['search_mun', 'search_emp', 'search_prot', 'search_disp', 'search_ano', 'search_sit', 'search_tipo_emp'].includes(f.id)) || [];
 
@@ -1498,7 +1513,7 @@ export default function App() {
 
   const globalPropertiesSchema = useMemo(() => {
     if (!isGlobalFilterPanelOpen) return [];
-    const visibleLayers = currentModeLayers.filter(l => l.visible);
+    const visibleLayers = currentModeLayers.filter(l => l.visible && !l.ignoreGlobalFilters);
     const allFeatures = visibleLayers.flatMap(l => l.data.features || []);
     return extractPropertySchemas(allFeatures);
   }, [currentModeLayers, isGlobalFilterPanelOpen]);
@@ -1519,7 +1534,7 @@ export default function App() {
         style: {} as any
       } as unknown as GisLayer;
     }
-    const visibleLayers = currentModeLayers.filter(l => l.visible);
+    const visibleLayers = currentModeLayers.filter(l => l.visible && !l.ignoreGlobalFilters);
     const globalFeatureCount = visibleLayers.reduce((acc, l) => acc + (l.data.features?.length || 0), 0);
     const globalFilteredCount = visibleLayers.reduce((acc, l) => acc + l.filteredCount, 0);
     const globalFilters = visibleLayers[0]?.filters?.filter(f => !f.id.startsWith('search_')) || [];
@@ -1572,7 +1587,7 @@ export default function App() {
         appMode={appMode}
         onOpenBasemapModal={() => setIsBasemapModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
-        onLoadGeoJsonFile={(file) => requireAuth(() => handleLoadGeoJsonFile(file))}
+        onLoadGeoJsonFile={(file, options) => requireAuth(() => handleLoadGeoJsonFile(file, options))}
 
         onRequireAuth={requireAuth}
         onPublishToPublic={handlePublishToPublic}
@@ -1596,7 +1611,7 @@ export default function App() {
         situacaoFilter={consumerSituacao}
         tipoEmpreendimentoFilter={consumerTipoEmpreendimento}
         onOpenGlobalFilters={() => setIsGlobalFilterPanelOpen(true)}
-        globalFiltersCount={layers[0]?.filters?.filter(f => !f.id.startsWith('search_') && f.active)?.length || 0}
+        globalFiltersCount={layers.find(l => !l.ignoreGlobalFilters)?.filters?.filter(f => !f.id.startsWith('search_') && f.active)?.length || 0}
         onClearGlobalFilters={() => handleUpdateFilters('GLOBAL', [])}
         onClearAllFilters={handleClearAllFilters}
       />
