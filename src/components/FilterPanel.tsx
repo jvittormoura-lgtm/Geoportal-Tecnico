@@ -85,7 +85,8 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   // Construct effective layer based on current targetLayerId
   const effectiveLayer = useMemo(() => {
     if (targetLayerId === 'GLOBAL') {
-      const candidateLayers = allLayers.length > 0 ? allLayers : (layer ? [layer] : []);
+      const rawCandidateLayers = allLayers.length > 0 ? allLayers : (layer ? [layer] : []);
+      const candidateLayers = rawCandidateLayers.filter(l => !l.ignoreGlobalFilters);
       const visibleLayers = candidateLayers.filter(l => l.visible);
       const layersToUse = visibleLayers.length > 0 ? visibleLayers : candidateLayers;
       
@@ -150,7 +151,7 @@ export const FilterPanel: React.FC<FilterPanelProps> = ({
   const globalDispensadosCount = useMemo(() => {
     if (!allLayers || allLayers.length === 0) return 0;
     let count = 0;
-    allLayers.forEach(l => {
+    allLayers.filter(l => !l.ignoreGlobalFilters).forEach(l => {
       (l.data?.features || []).forEach(f => {
         if (getFeatureSituacao(f.properties || '') === 'DISPENSADO' || getFeatureDispensa(f.properties || '')) {
           count++;
