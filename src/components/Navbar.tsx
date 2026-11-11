@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { BasemapOption, GisLayer, AppMode } from '../types/gis';
 
 import { 
-  Upload, Download, Send, CheckCircle2, Layers, ShieldOff, X, FileText
+  Upload, Download, Send, CheckCircle2, Layers, ShieldOff, X, FileText, Globe
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -12,6 +12,7 @@ interface NavbarProps {
   appMode?: AppMode;
   onOpenBasemapModal: () => void;
   onOpenExportModal: () => void;
+  onOpenWmsModal?: () => void;
   onLoadGeoJsonFile: (file: File, options?: { ignoreGlobalFilter?: boolean }) => void;
   onLoadSampleDataset?: (datasetId: string) => void;
   onRequireAuth?: (callback: () => void) => void;
@@ -23,6 +24,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   layers,
   onOpenExportModal,
+  onOpenWmsModal,
   onLoadGeoJsonFile,
   onPublishToPublic,
   hasUnpublishedChanges = false
@@ -105,6 +107,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Web Layers (WMS / XYZ / Remote GeoJSON) Button */}
+          {onOpenWmsModal && (
+            <button
+              id="btn-open-wms-modal"
+              type="button"
+              onClick={onOpenWmsModal}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 active:scale-98 whitespace-nowrap shrink-0"
+              title="Conectar camadas OGC WMS (DataGeo SP / IBGE), Tiles XYZ ou GeoJSON remoto"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Adicionar Camadas Web</span>
+            </button>
+          )}
+
           {/* Upload Button */}
           <button
             id="btn-upload-geojson"

@@ -160,6 +160,7 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
   const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const vectorLayersRef = useRef<Map<string, L.GeoJSON>>(new Map());
+  const serviceLayersRef = useRef<Map<string, L.TileLayer>>(new Map());
   const layerSignaturesRef = useRef<Map<string, string>>(new Map());
   const prevLayerOrderRef = useRef<string>('');
   const canvasRendererRef = useRef<L.Canvas | null>(null);
@@ -354,8 +355,8 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       fillColor: fill,
       color: stroke,
       weight: layer.style?.strokeWidth ?? 2,
-      opacity: Math.max(0.05, Math.min(1, isNaN(strokeOpacity * layerOpacity) ? 0.9 : strokeOpacity * layerOpacity)),
-      fillOpacity: Math.max(0.05, Math.min(1, isNaN(fillOpacity * layerOpacity) ? 0.45 : fillOpacity * layerOpacity))
+      opacity: strokeOpacity === 0 ? 0 : Math.max(0.05, Math.min(1, isNaN(strokeOpacity * layerOpacity) ? 0.9 : strokeOpacity * layerOpacity)),
+      fillOpacity: fillOpacity === 0 ? 0 : Math.max(0.05, Math.min(1, isNaN(fillOpacity * layerOpacity) ? 0.45 : fillOpacity * layerOpacity))
     };
   }, []);
 
@@ -584,6 +585,9 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       l.id,
       l.visible ? '1' : '0',
       l.opacity ?? 1,
+      l.serviceType || '',
+      JSON.stringify(l.wmsConfig || {}),
+      JSON.stringify(l.xyzConfig || {}),
       l.data?.features?.length || 0,
       JSON.stringify(l.filters || []),
       JSON.stringify(l.style || {}),
@@ -594,7 +598,7 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
     ].join('|');
   }, []);
 
-  // Update Vector Layers on Map with incremental caching and hardware-accelerated Canvas
+  // Update Vector & Web Service Layers on Map with incremental caching and hardware-accelerated Canvas
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -608,6 +612,13 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
         layerSignaturesRef.current.delete(layerId);
       }
     });
+    serviceLayersRef.current.forEach((leafletTileLayer, layerId) => {
+      if (!currentLayerIds.has(layerId)) {
+        map.removeLayer(leafletTileLayer);
+        serviceLayersRef.current.delete(layerId);
+        layerSignaturesRef.current.delete(layerId);
+      }
+    });
 
     // Check if layer order sequence changed
     const currentOrderKey = layers.map(l => l.id).join(',');
@@ -617,29 +628,98 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
     // Add or update layers (reverse to match Photoshop/QGIS top-to-bottom visual order)
     const reversedLayers = [...layers].reverse();
 
-    reversedLayers.forEach((layer) => {
-      const existing = vectorLayersRef.current.get(layer.id);
+    reversedLayers.forEach((layer, idx) => {
+      const existingVector = vectorLayersRef.current.get(layer.id);
+      const existingService = serviceLayersRef.current.get(layer.id);
       const signature = getLayerSignature(layer);
       const prevSignature = layerSignaturesRef.current.get(layer.id);
 
       if (!layer.visible) {
-        if (existing) {
-          map.removeLayer(existing);
+        if (existingVector) {
+          map.removeLayer(existingVector);
           vectorLayersRef.current.delete(layer.id);
-          layerSignaturesRef.current.delete(layer.id);
+        }
+        if (existingService) {
+          map.removeLayer(existingService);
+          serviceLayersRef.current.delete(layer.id);
+        }
+        layerSignaturesRef.current.delete(layer.id);
+        return;
+      }
+
+      // Handle OGC WMS Service Layers
+      if (layer.serviceType === 'wms' && layer.wmsConfig) {
+        if (existingService && prevSignature === signature && !orderChanged) {
+          return;
+        }
+        if (existingService) {
+          map.removeLayer(existingService);
+          serviceLayersRef.current.delete(layer.id);
+        }
+        if (existingVector) {
+          map.removeLayer(existingVector);
+          vectorLayersRef.current.delete(layer.id);
+        }
+        try {
+          const wmsLayer = L.tileLayer.wms(layer.wmsConfig.url, {
+            layers: layer.wmsConfig.layers,
+            format: layer.wmsConfig.format || 'image/png',
+            transparent: layer.wmsConfig.transparent ?? true,
+            version: layer.wmsConfig.version || '1.1.1',
+            opacity: typeof layer.opacity === 'number' ? layer.opacity : 0.85,
+            zIndex: 200 + idx
+          } as any);
+          wmsLayer.addTo(map);
+          serviceLayersRef.current.set(layer.id, wmsLayer);
+          layerSignaturesRef.current.set(layer.id, signature);
+        } catch (wmsErr) {
+          console.error(`Falha ao instanciar camada WMS ${layer.name}:`, wmsErr);
         }
         return;
       }
 
-      // If layer already rendered and its configuration hasn't changed and order hasn't changed, KEEP IT!
-      if (existing && prevSignature === signature && !orderChanged) {
+      // Handle XYZ / TMS Tile Layers
+      if (layer.serviceType === 'xyz' && layer.xyzConfig) {
+        if (existingService && prevSignature === signature && !orderChanged) {
+          return;
+        }
+        if (existingService) {
+          map.removeLayer(existingService);
+          serviceLayersRef.current.delete(layer.id);
+        }
+        if (existingVector) {
+          map.removeLayer(existingVector);
+          vectorLayersRef.current.delete(layer.id);
+        }
+        try {
+          const xyzLayer = L.tileLayer(layer.xyzConfig.url, {
+            opacity: typeof layer.opacity === 'number' ? layer.opacity : 0.85,
+            maxZoom: layer.xyzConfig.maxZoom || 19,
+            attribution: layer.xyzConfig.attribution || '',
+            zIndex: 150 + idx
+          });
+          xyzLayer.addTo(map);
+          serviceLayersRef.current.set(layer.id, xyzLayer);
+          layerSignaturesRef.current.set(layer.id, signature);
+        } catch (xyzErr) {
+          console.error(`Falha ao instanciar camada XYZ ${layer.name}:`, xyzErr);
+        }
+        return;
+      }
+
+      // If vector layer already rendered and its configuration hasn't changed and order hasn't changed, KEEP IT!
+      if (existingVector && prevSignature === signature && !orderChanged) {
         return;
       }
 
       // Clean up previous layer instance if needing recreation
-      if (existing) {
-        map.removeLayer(existing);
+      if (existingVector) {
+        map.removeLayer(existingVector);
         vectorLayersRef.current.delete(layer.id);
+      }
+      if (existingService) {
+        map.removeLayer(existingService);
+        serviceLayersRef.current.delete(layer.id);
       }
 
       // Filter features

@@ -336,6 +336,16 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
                           </>
                         )}
                         <div className="flex items-center gap-1 shrink-0">
+                          {layer.serviceType === 'wms' && (
+                            <span className="px-1.5 py-0.5 bg-red-50 text-red-700 border border-red-200 rounded text-[9px] font-bold uppercase tracking-wider">
+                              WMS
+                            </span>
+                          )}
+                          {layer.serviceType === 'xyz' && (
+                            <span className="px-1.5 py-0.5 bg-sky-50 text-sky-700 border border-sky-200 rounded text-[9px] font-bold uppercase tracking-wider">
+                              XYZ
+                            </span>
+                          )}
                           {layer.isRealtime && (
                             <span className="flex items-center gap-1 px-1.5 py-0.2 bg-rose-500/20 text-rose-700 border border-rose-200 rounded-full text-[9px] font-semibold animate-pulse">
                               <Activity className="w-2.5 h-2.5" />
@@ -351,17 +361,26 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
                       </div>
 
                       <div className="flex items-center flex-wrap gap-1.5 text-[10px] text-slate-500 mt-1">
-                        <span className="flex items-center gap-1">
-                          {getGeometryIcon(layer.geometryType)}
-                          {layer.geometryType}
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="font-mono text-emerald-600 font-medium tabular-nums">
-                          {layer.filteredCount}{' '}
-                          {layer.filteredCount !== layer.featureCount && (
-                            <span className="text-slate-500">/ {layer.featureCount}</span>
-                          )}
-                        </span>
+                        {layer.serviceType === 'wms' || layer.serviceType === 'xyz' ? (
+                          <span className="flex items-center gap-1 font-medium text-slate-600">
+                            {getGeometryIcon(layer.geometryType)}
+                            {layer.serviceType === 'wms' ? 'Serviço OGC WMS' : 'Camada Tiles XYZ'}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="flex items-center gap-1">
+                              {getGeometryIcon(layer.geometryType)}
+                              {layer.geometryType}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="font-mono text-emerald-600 font-medium tabular-nums">
+                              {layer.filteredCount}{' '}
+                              {layer.filteredCount !== layer.featureCount && (
+                                <span className="text-slate-500">/ {layer.featureCount}</span>
+                              )}
+                            </span>
+                          </>
+                        )}
                         {layer.ignoreGlobalFilter && (
                           <>
                             <span aria-hidden="true">·</span>
@@ -391,8 +410,9 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
                     ]}
                   />
 
-                  {/* Smooth Factor Slider (Gestor Only) */}
+                  {/* Smooth Factor Slider (Gestor Only - Vector Layers Only) */}
                   {appMode === 'gestor' && onChangeSmoothFactor && 
+                   layer.serviceType !== 'wms' && layer.serviceType !== 'xyz' &&
                    (layer.geometryType !== 'Point' && layer.geometryType !== 'MultiPoint') && (
                     <DebouncedSlider
                       label="Simplificar"
@@ -412,50 +432,65 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
                   {/* Action Buttons Toolbar */}
                   <div className="mt-3 pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
                     <div className="flex items-center gap-1">
-                      {appMode === 'gestor' && (
+                      {layer.serviceType === 'wms' || layer.serviceType === 'xyz' ? (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleProtectedAction(() => onOpenStyleModal(layer));
+                            onZoomToLayer(layer.id);
                           }}
                           className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                          title="Estilizar Camada / Cores"
+                          title="Enquadrar extensão da camada no mapa"
                         >
-                          <Palette className="w-3 h-3 text-red-600" />
-                          <span className="text-[10px] hidden sm:inline">Estilo</span>
+                          <ZoomIn className="w-3 h-3 text-red-600" />
+                          <span className="text-[10px]">Enquadrar Zoom</span>
                         </button>
-                      )}
+                      ) : (
+                        <>
+                          {appMode === 'gestor' && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleProtectedAction(() => onOpenStyleModal(layer));
+                              }}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                              title="Estilizar Camada / Cores"
+                            >
+                              <Palette className="w-3 h-3 text-red-600" />
+                              <span className="text-[10px] hidden sm:inline">Estilo</span>
+                            </button>
+                          )}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenAttributeTable(layer);
-                        }}
-                        className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors"
-                        title="Ver Tabela de Atributos"
-                      >
-                        <Table className="w-3 h-3 text-emerald-400" />
-                        <span className="text-[10px] hidden sm:inline">Tabela</span>
-                      </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenAttributeTable(layer);
+                            }}
+                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                            title="Ver Tabela de Atributos"
+                          >
+                            <Table className="w-3 h-3 text-emerald-400" />
+                            <span className="text-[10px] hidden sm:inline">Tabela</span>
+                          </button>
 
-                      {appMode === 'gestor' && onOpenFieldManager && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenFieldManager(layer);
-                          }}
-                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
-                          title="Gerenciar ordem dos campos no pop-up e tabela, visibilidade e renomeação"
-                        >
-                          <Columns className="w-3 h-3 text-red-600" />
-                          <span className="text-[10px] hidden sm:inline">Campos</span>
-                        </button>
+                          {appMode === 'gestor' && onOpenFieldManager && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenFieldManager(layer);
+                              }}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                              title="Gerenciar ordem dos campos no pop-up e tabela, visibilidade e renomeação"
+                            >
+                              <Columns className="w-3 h-3 text-red-600" />
+                              <span className="text-[10px] hidden sm:inline">Campos</span>
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
 
                     <div className="flex items-center gap-1">
-                      
-                      {onUpdateLayerData && (
+                      {onUpdateLayerData && layer.serviceType !== 'wms' && layer.serviceType !== 'xyz' && (
                         <>
                           <input 
                             type="file" 

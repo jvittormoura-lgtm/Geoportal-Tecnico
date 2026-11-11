@@ -86,32 +86,42 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         for (let i = 0; i < layers?.length; i++) {
           const lyr = layers[i];
-          let safeName = lyr.name
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-z0-9_-]/g, '_')
-            .replace(/_+/g, '_')
-            .replace(/^_|_$/g, '') || `camada_${i + 1}`;
-          
-          if (nameCounts[safeName]) {
-            nameCounts[safeName]++;
-            safeName = `${safeName}_${nameCounts[safeName]}`;
-          } else {
-            nameCounts[safeName] = 1;
+          const isRasterService = Boolean(lyr.isServiceLayer && (lyr.serviceType === 'wms' || lyr.serviceType === 'xyz'));
+          let layerFileName = '';
+
+          if (!isRasterService) {
+            let safeName = lyr.name
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9_-]/g, '_')
+              .replace(/_+/g, '_')
+              .replace(/^_|_$/g, '') || `camada_${i + 1}`;
+            
+            if (nameCounts[safeName]) {
+              nameCounts[safeName]++;
+              safeName = `${safeName}_${nameCounts[safeName]}`;
+            } else {
+              nameCounts[safeName] = 1;
+            }
+            
+            layerFileName = `${safeName}.geojson`;
+            zip.file(`data/${layerFileName}`, JSON.stringify(lyr.data, null, 2));
           }
-          
-          const layerFileName = `${safeName}.geojson`;
-          
-          zip.file(`data/${layerFileName}`, JSON.stringify(lyr.data, null, 2));
 
           configJson.camadas_fixas.push({
             id: lyr.id,
             nome: lyr.name,
-            arquivo: `data/${layerFileName}`,
+            ...(isRasterService ? {} : { arquivo: `data/${layerFileName}` }),
             visivel: lyr.visible,
             opacity: lyr.opacity,
             ignoreGlobalFilter: Boolean(lyr.ignoreGlobalFilter),
+            serviceType: lyr.serviceType || undefined,
+            isServiceLayer: lyr.isServiceLayer || undefined,
+            url: lyr.url || undefined,
+            wmsConfig: lyr.wmsConfig || undefined,
+            xyzConfig: lyr.xyzConfig || undefined,
+            bbox: lyr.bbox || undefined,
             popupTitleField: lyr.popupTitleField || undefined,
             popupVisibleFields: lyr.popupVisibleFields || [],
             popupFieldOrder: lyr.popupFieldOrder || [],
