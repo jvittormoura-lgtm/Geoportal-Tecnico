@@ -173,7 +173,7 @@ export default function App() {
   const createLayerFromGeoJson = useCallback((
     name: string,
     geojson: GeoJSON.FeatureCollection,
-    options?: { isRealtime?: boolean; realtimeUrl?: string; ignoreGlobalFilters?: boolean }
+    options?: { isRealtime?: boolean; realtimeUrl?: string; ignoreGlobalFilter?: boolean }
   ): GisLayer => {
     // Automatically normalize and reproject coordinates (WGS84, UTM 23S/22S, Web Mercator, inverted)
     const { geojson: normalizedGeojson, reprojected, detectedCrs } = normalizeAndReprojectGeoJson(geojson);
@@ -239,7 +239,7 @@ export default function App() {
       createdAt: Date.now(),
       isRealtime: options?.isRealtime,
       realtimeUrl: options?.realtimeUrl,
-      ignoreGlobalFilters: Boolean(options?.ignoreGlobalFilters)
+      ignoreGlobalFilter: options?.ignoreGlobalFilter || false
     };
   }, [layers?.length]);
 
@@ -722,7 +722,7 @@ export default function App() {
     applyStandardizedLayerUpdate(id, updatedGeojson, standardSchema);
   };
 
-  const handleLoadGeoJsonFile = async (file: File, options?: { ignoreGlobalFilters?: boolean }) => {
+  const handleLoadGeoJsonFile = async (file: File, options?: { ignoreGlobalFilter?: boolean }) => {
     try {
       const text = await file.text();
       let geojson: GeoJSON.FeatureCollection;
@@ -770,12 +770,13 @@ export default function App() {
       }
 
       const layerName = file.name.replace(/\.[^/.]+$/, '');
+      const isOverlayLayer = Boolean(options?.ignoreGlobalFilter);
       const newLayer = createLayerFromGeoJson(layerName, geojson, {
-        ignoreGlobalFilters: options?.ignoreGlobalFilters
+        ignoreGlobalFilter: isOverlayLayer
       });
       
-      // Inherit global search filters only if layer is part of global filter
-      if (!newLayer.ignoreGlobalFilters) {
+      // Inherit global search filters only if NOT marked as an overlay layer
+      if (!isOverlayLayer) {
         const dynamicFilters: AttributeFilter[] = [];
         if (consumerMunicipio.trim()) {
           dynamicFilters.push({ id: 'search_mun', property: '*', type: 'string', operator: 'match_municipio', value: consumerMunicipio.trim(), active: true });
@@ -812,11 +813,11 @@ export default function App() {
       });
       setPublishedLayers(prev => [newLayer, ...prev]);
       setActiveLayerId(newLayer.id);
-      showToast(
-        newLayer.ignoreGlobalFilters
-          ? `Camada de sobreposição "${layerName}" carregada (${newLayer.featureCount} feições, isenta do filtro global)!`
-          : `Camada "${layerName}" carregada com sucesso (${newLayer.featureCount} polígonos/feições)!`
-      );
+      if (isOverlayLayer) {
+        showToast(`Camada de sobreposição "${layerName}" carregada (${newLayer.featureCount} feições sem filtro global)!`);
+      } else {
+        showToast(`Camada "${layerName}" carregada com sucesso (${newLayer.featureCount} polígonos/feições)!`);
+      }
     } catch (err: any) {
       console.error('Erro ao ler arquivo:', err);
       showToast(err.message || 'Falha ao processar arquivo GeoJSON.', 'error');
@@ -944,6 +945,77 @@ export default function App() {
     });
   };
 
+  const handleToggleIgnoreGlobalFilter = (id: string) => {
+    const target = layers.find(l => l.id === id);
+    if (!target) return;
+    const nextIgnoreState = !target.ignoreGlobalFilter;
+
+    const applyToggle = (prev: GisLayer[]) => {
+      // Find any active advanced global filters from another participating layer
+      const referenceGlobalLayer = prev.find(l => l.id !== id && !l.ignoreGlobalFilter);
+      const activeGlobalAdvancedFilters = referenceGlobalLayer?.filters?.filter(f => !f.id.startsWith('search_')) || [];
+
+      const updated = prev.map(l => {
+        if (l.id !== id) return l;
+
+        if (nextIgnoreState) {
+          // Overlay mode enabled: block all filtering on this layer
+          const totalCount = l.data?.features?.length || 0;
+          return {
+            ...l,
+            ignoreGlobalFilter: true,
+            filters: [],
+            filteredCount: totalCount
+          };
+        } else {
+          // Overlay mode disabled: inherit currently active global search & advanced filters
+          const dynamicFilters: AttributeFilter[] = [...activeGlobalAdvancedFilters];
+          if (consumerMunicipio.trim()) {
+            dynamicFilters.push({ id: 'search_mun', property: '*', type: 'string', operator: 'match_municipio', value: consumerMunicipio.trim(), active: true });
+          }
+          if (consumerEmpreendedor.trim()) {
+            dynamicFilters.push({ id: 'search_emp', property: '*', type: 'string', operator: 'match_empreendedor', value: consumerEmpreendedor.trim(), active: true });
+          }
+          if (consumerProtocolo.trim()) {
+            dynamicFilters.push({ id: 'search_prot', property: '*', type: 'string', operator: 'match_protocolo', value: consumerProtocolo.trim(), active: true });
+          }
+          if (consumerDispensa.trim()) {
+            dynamicFilters.push({ id: 'search_disp', property: '*', type: 'string', operator: 'match_dispensa', value: consumerDispensa.trim(), active: true });
+          }
+          if (consumerSituacao.trim()) {
+            dynamicFilters.push({ id: 'search_sit', property: '*', type: 'string', operator: 'match_situacao', value: consumerSituacao.trim(), active: true });
+          }
+          if (consumerTipoEmpreendimento.trim()) {
+            dynamicFilters.push({ id: 'search_tipo_emp', property: 'Base_Tipo de empreendimento', type: 'string', operator: 'match_tipo_empreendimento', value: consumerTipoEmpreendimento.trim(), active: true });
+          }
+          if (consumerAnoRange) {
+            dynamicFilters.push({ id: 'search_ano', property: '*', type: 'number', operator: 'match_ano_entrada', value: consumerAnoRange, active: true });
+          }
+
+          const filtered = filterFeatures(l.data.features, dynamicFilters);
+          return {
+            ...l,
+            ignoreGlobalFilter: false,
+            filters: dynamicFilters,
+            filteredCount: filtered?.length || 0
+          };
+        }
+      });
+
+      persistLayers(updated);
+      return updated;
+    };
+
+    setLayers(applyToggle);
+    setPublishedLayers(applyToggle);
+
+    if (nextIgnoreState) {
+      showToast(`Camada "${target.name}" marcada como Sobreposição (filtros bloqueados).`);
+    } else {
+      showToast(`Camada "${target.name}" vinculada novamente ao filtro global.`);
+    }
+  };
+
   const handleDuplicateLayer = (id: string) => {
     const orig = layers.find(l => l.id === id);
     if (!orig) return;
@@ -997,8 +1069,13 @@ export default function App() {
     let totalMatchedFeatures = 0;
 
     const applyUpdate = (prev: GisLayer[]) => prev.map(l => {
-      if (layerId === 'GLOBAL' && l.ignoreGlobalFilters) {
-        return l;
+      if (l.ignoreGlobalFilter) {
+        const totalCount = l.data?.features?.length || 0;
+        return {
+          ...l,
+          filters: [],
+          filteredCount: totalCount
+        };
       }
       if (layerId === 'GLOBAL' || l.id === layerId) {
         const quickFilters = l.filters?.filter(f => {
@@ -1067,9 +1144,15 @@ export default function App() {
 
     const applyFiltersToLayers = (prev: GisLayer[]) => {
       const newLayers = prev.map(l => {
-        if (l.ignoreGlobalFilters) {
-          return l;
+        if (l.ignoreGlobalFilter) {
+          const totalCount = l.data?.features?.length || 0;
+          return {
+            ...l,
+            filters: [],
+            filteredCount: totalCount
+          };
         }
+
         // 1. Keep any existing manual filters that are NOT from the quick search bar
         const existingFilters = l.filters?.filter(f => !['search_mun', 'search_emp', 'search_prot', 'search_disp', 'search_ano', 'search_sit', 'search_tipo_emp'].includes(f.id)) || [];
 
@@ -1513,7 +1596,7 @@ export default function App() {
 
   const globalPropertiesSchema = useMemo(() => {
     if (!isGlobalFilterPanelOpen) return [];
-    const visibleLayers = currentModeLayers.filter(l => l.visible && !l.ignoreGlobalFilters);
+    const visibleLayers = currentModeLayers.filter(l => l.visible && !l.ignoreGlobalFilter);
     const allFeatures = visibleLayers.flatMap(l => l.data.features || []);
     return extractPropertySchemas(allFeatures);
   }, [currentModeLayers, isGlobalFilterPanelOpen]);
@@ -1534,7 +1617,7 @@ export default function App() {
         style: {} as any
       } as unknown as GisLayer;
     }
-    const visibleLayers = currentModeLayers.filter(l => l.visible && !l.ignoreGlobalFilters);
+    const visibleLayers = currentModeLayers.filter(l => l.visible && !l.ignoreGlobalFilter);
     const globalFeatureCount = visibleLayers.reduce((acc, l) => acc + (l.data.features?.length || 0), 0);
     const globalFilteredCount = visibleLayers.reduce((acc, l) => acc + l.filteredCount, 0);
     const globalFilters = visibleLayers[0]?.filters?.filter(f => !f.id.startsWith('search_')) || [];
@@ -1583,12 +1666,11 @@ export default function App() {
       <Navbar
         layers={currentModeLayers}
         activeBasemap={activeBasemap}
-            onSelectBasemap={(b) => setActiveBasemap(b)}
+        onSelectBasemap={(b) => setActiveBasemap(b)}
         appMode={appMode}
         onOpenBasemapModal={() => setIsBasemapModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onLoadGeoJsonFile={(file, options) => requireAuth(() => handleLoadGeoJsonFile(file, options))}
-
         onRequireAuth={requireAuth}
         onPublishToPublic={handlePublishToPublic}
         lastPublishedAt={lastPublishedAt}
@@ -1599,7 +1681,7 @@ export default function App() {
       <ConsumerPortal
         layers={currentModeLayers}
         activeBasemap={activeBasemap}
-            onSelectBasemap={(b) => setActiveBasemap(b)}
+        onSelectBasemap={(b) => setActiveBasemap(b)}
         appMode={appMode}
         onSelectFeature={handleOpenProjectDetail}
         onFilterChange={handleMultiFilterChange}
@@ -1611,7 +1693,7 @@ export default function App() {
         situacaoFilter={consumerSituacao}
         tipoEmpreendimentoFilter={consumerTipoEmpreendimento}
         onOpenGlobalFilters={() => setIsGlobalFilterPanelOpen(true)}
-        globalFiltersCount={layers.find(l => !l.ignoreGlobalFilters)?.filters?.filter(f => !f.id.startsWith('search_') && f.active)?.length || 0}
+        globalFiltersCount={layers.find(l => !l.ignoreGlobalFilter)?.filters?.filter(f => !f.id.startsWith('search_') && f.active)?.length || 0}
         onClearGlobalFilters={() => handleUpdateFilters('GLOBAL', [])}
         onClearAllFilters={handleClearAllFilters}
       />
@@ -1707,6 +1789,7 @@ export default function App() {
               onUpdateLayerData={handleUpdateLayerData}
               onRequireAuth={requireAuth}
               onReorderLayers={handleReorderLayers}
+              onToggleIgnoreGlobalFilter={handleToggleIgnoreGlobalFilter}
             />
           )}
         </div>
