@@ -4,7 +4,7 @@ import Papa from "papaparse";
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import localforage from 'localforage';
 import { 
   GisLayer, BasemapOption, LayerStyle, ThematicConfig, 
@@ -170,11 +170,10 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4500);
   };
 
-  // Check published data on mount
-  useEffect(() => {
-  }, []);
+  const hasLoadedInitialLayersRef = useRef<boolean>(false);
+  const layerColorIndexRef = useRef<number>(0);
 
-  // Helper to create a new GisLayer object from GeoJSON
+  // Helper to create a new GisLayer object from GeoJSON (stable reference so it never re-triggers mount effects)
   const createLayerFromGeoJson = useCallback((
     name: string,
     geojson: GeoJSON.FeatureCollection,
@@ -215,7 +214,7 @@ export default function App() {
       }, 300);
     }
     const schema = extractPropertySchemas(features);
-    const colorPreset = DEFAULT_LAYER_COLORS[(layers?.length || 0) % DEFAULT_LAYER_COLORS.length];
+    const colorPreset = DEFAULT_LAYER_COLORS[layerColorIndexRef.current++ % DEFAULT_LAYER_COLORS.length];
 
     const defaultStyle: LayerStyle = {
       fillColor: colorPreset.fill,
@@ -246,10 +245,13 @@ export default function App() {
       realtimeUrl: options?.realtimeUrl,
       ignoreGlobalFilter: options?.ignoreGlobalFilter || false
     };
-  }, [layers?.length]);
+  }, []);
 
-  // Load layers prioritizing public/mapas-config.json + public/data/*.geojson (Anti-Cache Network-First), with localforage fallback
+  // Load layers strictly ONCE on page load/refresh (F5) prioritizing public/mapas-config.json
   useEffect(() => {
+    if (hasLoadedInitialLayersRef.current) return;
+    hasLoadedInitialLayersRef.current = true;
+
     const loadInitialLayers = async () => {
       // 1. SEMPRE buscar primeiro mapas-config.json e arquivos .geojson da pasta public/ com cache-busting
       try {
@@ -428,7 +430,7 @@ export default function App() {
     };
     
     loadInitialLayers();
-  }, [createLayerFromGeoJson]);
+  }, []);
 
   // Helper to persist layers locally and synchronize directly to public/data/*.geojson & public/mapas-config.json
   const persistLayers = async (layersToSave: GisLayer[]) => {
