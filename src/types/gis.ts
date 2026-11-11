@@ -126,7 +126,7 @@ export interface GisLayer {
   isRealtime?: boolean;
   realtimeUrl?: string;
   refreshIntervalSeconds?: number;
-  ignoreGlobalFilters?: boolean;
+  ignoreGlobalFilter?: boolean;
 }
 
 export interface BasemapOption {
