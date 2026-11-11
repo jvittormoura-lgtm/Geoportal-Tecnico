@@ -24,6 +24,7 @@ import { FieldMappingModal } from './components/FieldMappingModal';
 import { CrsWarningModal } from './components/CrsWarningModal';
 import { ProjectDetailModal } from './components/ProjectDetailModal';
 import { ConsumerPortal } from './components/ConsumerPortal';
+import { WmsModal } from './components/WmsModal';
 import { SAMPLE_DATASETS } from './utils/sampleDatasets';
 import { 
   parseGeoJson, detectGeometryType, calculateBoundingBox, 
@@ -134,6 +135,7 @@ export default function App() {
 
   // Modals & Panels
   const [isBasemapModalOpen, setIsBasemapModalOpen] = useState(false);
+  const [isWmsModalOpen, setIsWmsModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStyleModalOpen, setIsStyleModalOpen] = useState(false);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
@@ -303,6 +305,12 @@ export default function App() {
                       if (Array.isArray(item.popupFieldOrder)) {
                         lyr.popupFieldOrder = item.popupFieldOrder;
                       }
+                      if (item.serviceType) lyr.serviceType = item.serviceType;
+                      if (item.isServiceLayer !== undefined) lyr.isServiceLayer = Boolean(item.isServiceLayer);
+                      if (item.url) lyr.url = item.url;
+                      if (item.wmsConfig) lyr.wmsConfig = item.wmsConfig;
+                      if (item.xyzConfig) lyr.xyzConfig = item.xyzConfig;
+                      if (Array.isArray(item.bbox) && item.bbox.length === 4) lyr.bbox = item.bbox as [number, number, number, number];
                       staticLayers.push(lyr);
                     }
                   }
@@ -328,6 +336,12 @@ export default function App() {
                     lyr.popupFieldOrder = item.popupFieldOrder;
                     lyr.propertiesSchema = item.popupFieldOrder.map((f: string) => createDefaultPropertySchema(f));
                   }
+                  if (item.serviceType) lyr.serviceType = item.serviceType;
+                  if (item.isServiceLayer !== undefined) lyr.isServiceLayer = Boolean(item.isServiceLayer);
+                  if (item.url) lyr.url = item.url;
+                  if (item.wmsConfig) lyr.wmsConfig = item.wmsConfig;
+                  if (item.xyzConfig) lyr.xyzConfig = item.xyzConfig;
+                  if (Array.isArray(item.bbox) && item.bbox.length === 4) lyr.bbox = item.bbox as [number, number, number, number];
                   staticLayers.push(lyr);
                 }
               } catch (fetchErr) {
@@ -339,7 +353,7 @@ export default function App() {
               const lyr = createLayerFromGeoJson(item.nome || `Camada ${i + 1}`, emptyGeojson, {
                 isRealtime: item.isRealtime,
                 realtimeUrl: item.realtimeUrl,
-                ignoreGlobalFilter: Boolean(item.ignoreGlobalFilter)
+                ignoreGlobalFilter: item.ignoreGlobalFilter !== undefined ? Boolean(item.ignoreGlobalFilter) : true
               });
               if (item.id) lyr.id = item.id;
               if (item.description) lyr.description = item.description;
@@ -352,6 +366,12 @@ export default function App() {
               if (item.popupTitleField) lyr.popupTitleField = item.popupTitleField;
               if (Array.isArray(item.popupVisibleFields)) lyr.popupVisibleFields = item.popupVisibleFields;
               if (Array.isArray(item.popupFieldOrder)) lyr.popupFieldOrder = item.popupFieldOrder;
+              if (item.serviceType) lyr.serviceType = item.serviceType;
+              if (item.isServiceLayer !== undefined) lyr.isServiceLayer = Boolean(item.isServiceLayer);
+              if (item.url) lyr.url = item.url;
+              if (item.wmsConfig) lyr.wmsConfig = item.wmsConfig;
+              if (item.xyzConfig) lyr.xyzConfig = item.xyzConfig;
+              if (Array.isArray(item.bbox) && item.bbox.length === 4) lyr.bbox = item.bbox as [number, number, number, number];
               staticLayers.push(lyr);
             }
           }
@@ -1699,6 +1719,21 @@ export default function App() {
     setIsSidebarOpen(prev => !prev);
   }, []);
 
+  const handleAddWebLayer = useCallback((newLayer: GisLayer) => {
+    const layerWithOverlay: GisLayer = {
+      ...newLayer,
+      ignoreGlobalFilter: newLayer.ignoreGlobalFilter !== undefined ? newLayer.ignoreGlobalFilter : true
+    };
+    setLayers(prev => {
+      const updated = [layerWithOverlay, ...prev];
+      setPublishedLayers(updated);
+      persistLayers(updated);
+      return updated;
+    });
+    setActiveLayerId(layerWithOverlay.id);
+    showToast(`Camada Web "${layerWithOverlay.name}" adicionada ao mapa!`, 'success');
+  }, []);
+
   return (
     <div 
       className="flex flex-col h-screen w-screen bg-slate-50 text-slate-900 overflow-hidden"
@@ -1710,6 +1745,7 @@ export default function App() {
         onSelectBasemap={(b) => setActiveBasemap(b)}
         appMode={appMode}
         onOpenBasemapModal={() => setIsBasemapModalOpen(true)}
+        onOpenWmsModal={() => setIsWmsModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onLoadGeoJsonFile={(file, options) => requireAuth(() => handleLoadGeoJsonFile(file, options))}
         onRequireAuth={requireAuth}
@@ -1962,6 +1998,13 @@ export default function App() {
       )}
 
       {/* Other Core Modals */}
+      <WmsModal
+        isOpen={isWmsModalOpen}
+        onClose={() => setIsWmsModalOpen(false)}
+        existingLayers={currentModeLayers}
+        onAddLayer={handleAddWebLayer}
+      />
+
       {isBasemapModalOpen && (
         <BasemapSelector
           currentBasemap={activeBasemap}
