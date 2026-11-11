@@ -860,9 +860,7 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       if (!map) return;
 
       const currentLayers = layersRef.current;
-      const allValidLayers = currentLayers.filter(l => l.visible && l.data?.features?.length > 0);
-      const filterableValidLayers = allValidLayers.filter(l => !l.ignoreGlobalFilters);
-      const validLayers = filterableValidLayers.length > 0 ? filterableValidLayers : allValidLayers;
+      const validLayers = currentLayers.filter(l => l.visible && !l.ignoreGlobalFilter && l.data?.features?.length > 0);
       if (validLayers?.length > 0) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         

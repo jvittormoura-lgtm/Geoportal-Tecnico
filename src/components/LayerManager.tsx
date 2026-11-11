@@ -27,6 +27,7 @@ interface LayerManagerProps {
   onRenameLayer?: (id: string, newName: string) => void;
   onUpdateDescription?: (id: string, newDescription: string) => void;
   onReorderLayers?: (activeId: string, overId: string) => void;
+  onToggleIgnoreGlobalFilter?: (id: string) => void;
 }
 
 
@@ -110,7 +111,8 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
   onRenameLayer,
   onUpdateDescription,
   onReorderLayers,
-  onUpdateLayerData
+  onUpdateLayerData,
+  onToggleIgnoreGlobalFilter
 }) => {
   const [expandedLegends, setExpandedLegends] = React.useState<Record<string, boolean>>({});
   const [editingLayerId, setEditingLayerId] = React.useState<string | null>(null);
@@ -348,18 +350,29 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-1">
+                      <div className="flex items-center flex-wrap gap-1.5 text-[10px] text-slate-500 mt-1">
                         <span className="flex items-center gap-1">
                           {getGeometryIcon(layer.geometryType)}
                           {layer.geometryType}
                         </span>
-                        <span>•</span>
-                        <span className="font-mono text-emerald-600 font-medium">
+                        <span aria-hidden="true">·</span>
+                        <span className="font-mono text-emerald-600 font-medium tabular-nums">
                           {layer.filteredCount}{' '}
                           {layer.filteredCount !== layer.featureCount && (
                             <span className="text-slate-500">/ {layer.featureCount}</span>
                           )}
                         </span>
+                        {layer.ignoreGlobalFilter && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span
+                              className="text-amber-700 font-semibold whitespace-nowrap"
+                              title="Camada de Sobreposição: bloqueia e ignora todos os filtros globais"
+                            >
+                              Sobreposição (Sem Filtro)
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -431,7 +444,7 @@ export const LayerManager: React.FC<LayerManagerProps> = ({
                             e.stopPropagation();
                             onOpenFieldManager(layer);
                           }}
-                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors"
+                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-lg text-xs flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
                           title="Gerenciar ordem dos campos no pop-up e tabela, visibilidade e renomeação"
                         >
                           <Columns className="w-3 h-3 text-red-600" />

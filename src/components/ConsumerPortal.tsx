@@ -65,10 +65,10 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
   const [isResultsExpanded, setIsResultsExpanded] = useState(true);
   const [isResultsDismissed, setIsResultsDismissed] = useState(false);
 
-  // Extract all features from visible layers (excluding overlay layers that ignore global filters)
+  // Extract all features from visible layers after applying layer filters (excluding overlay layers)
   const allFeatures = useMemo(() => {
     const list: GeoJSON.Feature[] = [];
-    layers.filter(l => l.visible && !l.ignoreGlobalFilters).forEach(l => {
+    layers.filter(l => l.visible && !l.ignoreGlobalFilter).forEach(l => {
       if (l.data && l.data.features) {
         const visibleFeatures = filterFeatures(l.data.features, l.filters);
         list.push(...visibleFeatures);
@@ -81,7 +81,7 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
   // Extract from raw visible features to ensure the dropdown NEVER collapses when a filter is applied
   const municipalities = useMemo(() => {
     const map = new Map<string, string>(); // normKey -> displayKey
-    layers.filter(l => l.visible && !l.ignoreGlobalFilters).forEach(l => {
+    layers.filter(l => l.visible && !l.ignoreGlobalFilter).forEach(l => {
       if (l.data && l.data.features) {
         l.data.features.forEach(f => {
           const p = f.properties || {};
@@ -102,7 +102,7 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
   // Extract unique protocols and dispensas from raw features so suggestions never vanish
   const protocolosList = useMemo(() => {
     const set = new Set<string>();
-    layers.filter(l => l.visible && !l.ignoreGlobalFilters).forEach(l => {
+    layers.filter(l => l.visible && !l.ignoreGlobalFilter).forEach(l => {
       if (l.data && l.data.features) {
         l.data.features.forEach(f => {
           const p = f.properties || {};
@@ -122,7 +122,7 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
 
   const dispensasList = useMemo(() => {
     const set = new Set<string>();
-    layers.filter(l => l.visible && !l.ignoreGlobalFilters).forEach(l => {
+    layers.filter(l => l.visible && !l.ignoreGlobalFilter).forEach(l => {
       if (l.data && l.data.features) {
         l.data.features.forEach(f => {
           const p = f.properties || {};
@@ -141,7 +141,7 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
   const globalAnoRange = useMemo(() => {
     let min = Infinity;
     let max = -Infinity;
-    layers.filter(l => l.visible && !l.ignoreGlobalFilters).forEach(l => {
+    layers.filter(l => l.visible && !l.ignoreGlobalFilter).forEach(l => {
       if (l.data && l.data.features) {
         l.data.features.forEach(f => {
           const p = f.properties || {};
@@ -195,7 +195,7 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
       baseFilters.push({ id: 'cnt_ano', property: '*', type: 'number', operator: 'match_ano_entrada', value: anoFilter, active: true });
     }
 
-    layers.filter(l => l.visible && !l.ignoreGlobalFilters).forEach(l => {
+    layers.filter(l => l.visible && !l.ignoreGlobalFilter).forEach(l => {
       if (l.data && l.data.features) {
         // Mantém filtros manuais de atributos que não sejam de situação
         const layerManualFilters = (l.filters || []).filter(f => !f.id.startsWith('search_') && !isSituacaoProperty(f.property));
@@ -276,7 +276,7 @@ export const ConsumerPortal: React.FC<ConsumerPortalProps> = ({
 
   const hasTextSearch = Boolean(municipioFilter.trim() || empreendedorFilter.trim() || protocoloFilter.trim() || dispensaFilter.trim() || situacaoFilter.trim());
   const hasQuickFilter = hasTextSearch || !!anoFilter;
-  const hasLayerFilters = layers.some(l => !l.ignoreGlobalFilters && l.filters && l.filters.length > 0);
+  const hasLayerFilters = layers.some(l => l.filters && l.filters.length > 0);
   const hasAnyFilter = hasQuickFilter || globalFiltersCount > 0 || hasLayerFilters;
 
   // Filtered matching list for quick dropdown / preview:
