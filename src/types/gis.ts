@@ -127,6 +127,23 @@ export interface GisLayer {
   realtimeUrl?: string;
   refreshIntervalSeconds?: number;
   ignoreGlobalFilter?: boolean;
+  serviceType?: 'wms' | 'xyz' | 'geojson';
+  isServiceLayer?: boolean;
+  url?: string;
+  wmsConfig?: {
+    url: string;
+    layers: string;
+    format: string;
+    transparent: boolean;
+    version: string;
+    crs?: string;
+  };
+  xyzConfig?: {
+    url: string;
+    maxZoom?: number;
+    attribution?: string;
+    isOverlay?: boolean;
+  };
 }
 
 export interface BasemapOption {
