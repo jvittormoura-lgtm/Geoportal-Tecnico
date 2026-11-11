@@ -1725,11 +1725,11 @@ export default function App() {
       ignoreGlobalFilter: newLayer.ignoreGlobalFilter !== undefined ? newLayer.ignoreGlobalFilter : true
     };
     setLayers(prev => {
-      const updated = [layerWithOverlay, ...prev];
-      setPublishedLayers(updated);
+      const updated = [...prev, layerWithOverlay];
       persistLayers(updated);
       return updated;
     });
+    setPublishedLayers(prev => [...prev, layerWithOverlay]);
     setActiveLayerId(layerWithOverlay.id);
     showToast(`Camada Web "${layerWithOverlay.name}" adicionada ao mapa!`, 'success');
   }, []);
