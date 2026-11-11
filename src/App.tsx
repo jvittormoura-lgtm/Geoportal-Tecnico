@@ -31,6 +31,11 @@ import {
   normalizeSearchText, normalizeAndReprojectGeoJson,
   validateGeoJsonWgs84, sanitizeAndCleanGeoJsonFeatures
 } from './utils/geoJsonParser';
+import {
+  fetchPublicAsset,
+  fetchPublicJson,
+  syncLayersToPublicServer
+} from './utils/assetUrl';
 import { PanelRight, PanelRightClose, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const DEFAULT_LAYER_COLORS = [
@@ -243,144 +248,176 @@ export default function App() {
     };
   }, [layers?.length]);
 
-  // Load published layers from local storage or initialize with mapas-config.json
+  // Load layers prioritizing public/mapas-config.json + public/data/*.geojson (Anti-Cache Network-First), with localforage fallback
   useEffect(() => {
     const loadInitialLayers = async () => {
-      // 1. Check localforage FIRST (User's persistent state)
+      // 1. SEMPRE buscar primeiro mapas-config.json e arquivos .geojson da pasta public/ com cache-busting
       try {
-        const storedLayers = await localforage.getItem<GisLayer[]>('graprohab_layers');
-        const hasInitialized = await localforage.getItem<boolean>('graprohab_initialized');
-        const storedTime = await localforage.getItem<number>('graprohab_published_at');
-        
-        if (hasInitialized && Array.isArray(storedLayers)) {
-          // Coerce Area keys for previously stored data
-          const areaKeys = [
-            'ÁREA TOTAL DA GLEBA/M²', 'AREA TOTAL DA GLEBA/M²', 'ÁREA TOTAL DA GLEBA / M²',
-            'AREA TOTAL DA GLEBA / M²', 'AREA_TOTAL_DA_GLEBA_M2', 'AREA_TOTAL_GLEBA_M2',
-            'AREA_GLEBA_M2', 'area_gleba_m2', 'AREA_TOTAL_M2', 'area_total_m2',
-            'AREA_TOTAL', 'area_total', 'AREA_GLEBA', 'area_gleba', 'AREA_M2', 'area_m2',
-            'Área (m²)'
-          ];
-          const validated = storedLayers.map(l => {
-            const features = l.data?.features || [];
-            features.forEach(f => {
-              if (f.properties) {
-                for (const k of areaKeys) {
-                  if (f.properties[k] !== undefined && typeof f.properties[k] === 'string') {
-                    const val = parseNumericValue(f.properties[k]);
-                    if (!isNaN(val)) {
-                      f.properties[k] = val;
+        const config = await fetchPublicJson<any>('mapas-config.json');
+        if (config && Array.isArray(config.camadas_fixas) && config.camadas_fixas.length > 0) {
+          const staticLayers: GisLayer[] = [];
+
+          for (let i = 0; i < config.camadas_fixas.length; i++) {
+            const item = config.camadas_fixas[i];
+            if (item.arquivo) {
+              try {
+                const dataRes = await fetchPublicAsset(item.arquivo);
+                if (dataRes.ok) {
+                  const text = await dataRes.text();
+                  if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
+                    const geojson = JSON.parse(text);
+                    if (geojson && (geojson.type === 'FeatureCollection' || geojson.features)) {
+                      const lyr = createLayerFromGeoJson(item.nome || `Camada ${i + 1}`, geojson, {
+                        isRealtime: item.isRealtime,
+                        realtimeUrl: item.realtimeUrl,
+                        ignoreGlobalFilter: Boolean(item.ignoreGlobalFilter)
+                      });
+                      if (item.id) lyr.id = item.id;
+                      if (item.description) lyr.description = item.description;
+                      if (item.visivel !== undefined) {
+                        lyr.visible = Boolean(item.visivel);
+                      }
+                      if (item.estilo) {
+                        lyr.style = { ...lyr.style, ...item.estilo };
+                      }
+                      if (item.opacity !== undefined) {
+                        lyr.opacity = Number(item.opacity);
+                      }
+                      if (item.ignoreGlobalFilter !== undefined) {
+                        lyr.ignoreGlobalFilter = Boolean(item.ignoreGlobalFilter);
+                      }
+                      if (item.thematic) {
+                        lyr.thematic = item.thematic;
+                      }
+                      if (item.isHeatmap !== undefined) {
+                        lyr.isHeatmap = Boolean(item.isHeatmap);
+                      }
+                      if (item.popupTitleField) {
+                        lyr.popupTitleField = item.popupTitleField;
+                      }
+                      if (Array.isArray(item.popupVisibleFields)) {
+                        lyr.popupVisibleFields = item.popupVisibleFields;
+                      }
+                      if (Array.isArray(item.popupFieldOrder)) {
+                        lyr.popupFieldOrder = item.popupFieldOrder;
+                      }
+                      staticLayers.push(lyr);
                     }
                   }
+                } else {
+                  // Fallback: create layer with metadata from config so it is never dropped
+                  const emptyGeojson: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+                  const lyr = createLayerFromGeoJson(item.nome || `Camada ${i + 1}`, emptyGeojson, {
+                    isRealtime: item.isRealtime,
+                    realtimeUrl: item.realtimeUrl,
+                    ignoreGlobalFilter: Boolean(item.ignoreGlobalFilter)
+                  });
+                  if (item.id) lyr.id = item.id;
+                  if (item.description) lyr.description = item.description;
+                  if (item.visivel !== undefined) lyr.visible = Boolean(item.visivel);
+                  if (item.estilo) lyr.style = { ...lyr.style, ...item.estilo, smoothFactor: Math.min(item.estilo.smoothFactor ?? 1.5, 1.5) };
+                  if (item.opacity !== undefined) lyr.opacity = Number(item.opacity);
+                  if (item.ignoreGlobalFilter !== undefined) lyr.ignoreGlobalFilter = Boolean(item.ignoreGlobalFilter);
+                  if (item.thematic) lyr.thematic = item.thematic;
+                  if (item.isHeatmap !== undefined) lyr.isHeatmap = Boolean(item.isHeatmap);
+                  if (item.popupTitleField) lyr.popupTitleField = item.popupTitleField;
+                  if (Array.isArray(item.popupVisibleFields)) lyr.popupVisibleFields = item.popupVisibleFields;
+                  if (Array.isArray(item.popupFieldOrder)) {
+                    lyr.popupFieldOrder = item.popupFieldOrder;
+                    lyr.propertiesSchema = item.popupFieldOrder.map((f: string) => createDefaultPropertySchema(f));
+                  }
+                  staticLayers.push(lyr);
                 }
+              } catch (fetchErr) {
+                console.warn(`Não foi possível processar arquivo estático ${item.arquivo}:`, fetchErr);
               }
-            });
-            const standardSchema = getStandardSchemaForLayer(l);
-            return {
-              ...l,
-              geometryType: detectGeometryType(features),
-              featureCount: features?.length || 0,
-              propertiesSchema: standardSchema.length > 0 ? standardSchema : extractPropertySchemas(features)
-            };
-          });
-          setLayers(validated);
-          setPublishedLayers(validated);
-          if (validated.length > 0) {
-            setActiveLayerId(validated[0].id);
+            } else {
+              // Camada de serviço (WMS/XYZ/Realtime) sem arquivo .geojson local
+              const emptyGeojson: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+              const lyr = createLayerFromGeoJson(item.nome || `Camada ${i + 1}`, emptyGeojson, {
+                isRealtime: item.isRealtime,
+                realtimeUrl: item.realtimeUrl,
+                ignoreGlobalFilter: Boolean(item.ignoreGlobalFilter)
+              });
+              if (item.id) lyr.id = item.id;
+              if (item.description) lyr.description = item.description;
+              if (item.visivel !== undefined) lyr.visible = Boolean(item.visivel);
+              if (item.estilo) lyr.style = { ...lyr.style, ...item.estilo };
+              if (item.opacity !== undefined) lyr.opacity = Number(item.opacity);
+              if (item.ignoreGlobalFilter !== undefined) lyr.ignoreGlobalFilter = Boolean(item.ignoreGlobalFilter);
+              if (item.thematic) lyr.thematic = item.thematic;
+              if (item.isHeatmap !== undefined) lyr.isHeatmap = Boolean(item.isHeatmap);
+              if (item.popupTitleField) lyr.popupTitleField = item.popupTitleField;
+              if (Array.isArray(item.popupVisibleFields)) lyr.popupVisibleFields = item.popupVisibleFields;
+              if (Array.isArray(item.popupFieldOrder)) lyr.popupFieldOrder = item.popupFieldOrder;
+              staticLayers.push(lyr);
+            }
           }
-          if (storedTime) {
-            setLastPublishedAt(storedTime);
-          }
-          return;
-        }
-      } catch (err) {
-        console.warn('Erro ao carregar dados salvos localmente:', err);
-      }
 
-      // 2. Only if no persistent state exists (first-time initialization), check public/mapas-config.json
-      try {
-        const baseUrl = (import.meta as any).env?.BASE_URL || './';
-        const configUrl = baseUrl.endsWith('/') ? `${baseUrl}mapas-config.json` : `${baseUrl}/mapas-config.json`;
-        const res = await fetch(configUrl);
-        if (res.ok) {
-          const config = await res.json();
-          if (config && Array.isArray(config.camadas_fixas) && config.camadas_fixas?.length > 0) {
-            const staticLayers: GisLayer[] = [];
-            
-            for (let i = 0; i < config.camadas_fixas?.length; i++) {
-              const item = config.camadas_fixas[i];
-              if (item.arquivo) {
-                let fileUrl = item.arquivo;
-                if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
-                  const cleanPath = item.arquivo.replace(/^\.?\//, '');
-                  fileUrl = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}${cleanPath}`;
-                }
-                
-                try {
-                  const dataRes = await fetch(fileUrl);
-                  if (dataRes.ok) {
-                    const text = await dataRes.text();
-                    if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
-                      const geojson = JSON.parse(text);
-                      if (geojson && (geojson.type === 'FeatureCollection' || geojson.features)) {
-                        const lyr = createLayerFromGeoJson(item.nome || `Camada ${i + 1}`, geojson);
-                        if (item.visivel !== undefined) {
-                          lyr.visible = Boolean(item.visivel);
-                        }
-                        if (item.estilo) {
-                          lyr.style = { ...lyr.style, ...item.estilo };
-                        }
-                        if (item.opacity !== undefined) {
-                          lyr.opacity = Number(item.opacity);
-                        }
-                        if (item.popupTitleField) {
-                          lyr.popupTitleField = item.popupTitleField;
-                        }
-                        if (Array.isArray(item.popupVisibleFields)) {
-                          lyr.popupVisibleFields = item.popupVisibleFields;
-                        }
-                        if (Array.isArray(item.popupFieldOrder)) {
-                          lyr.popupFieldOrder = item.popupFieldOrder;
-                        }
-                        staticLayers.push(lyr);
+          if (staticLayers.length > 0) {
+            const publishedTimestamp = typeof config.updatedAt === 'number' ? config.updatedAt : Date.now();
+            setLayers(staticLayers);
+            setPublishedLayers(staticLayers);
+            setActiveLayerId(staticLayers[0].id);
+            setLastPublishedAt(publishedTimestamp);
+            await localforage.setItem('graprohab_layers', staticLayers);
+            await localforage.setItem('graprohab_initialized', true);
+            await localforage.setItem('graprohab_published_at', publishedTimestamp);
+            return;
+          }
+        }
+      } catch (networkErr) {
+        console.warn('Falha ao buscar mapas-config.json da rede, recorrendo ao fallback localforage:', networkErr);
+        // 2. Fallback para localforage APENAS caso a leitura de rede falhe
+        try {
+          const storedLayers = await localforage.getItem<GisLayer[]>('graprohab_layers');
+          const hasInitialized = await localforage.getItem<boolean>('graprohab_initialized');
+          const storedTime = await localforage.getItem<number>('graprohab_published_at');
+
+          if (hasInitialized && Array.isArray(storedLayers) && storedLayers.length > 0) {
+            const areaKeys = [
+              'ÁREA TOTAL DA GLEBA/M²', 'AREA TOTAL DA GLEBA/M²', 'ÁREA TOTAL DA GLEBA / M²',
+              'AREA TOTAL DA GLEBA / M²', 'AREA_TOTAL_DA_GLEBA_M2', 'AREA_TOTAL_GLEBA_M2',
+              'AREA_GLEBA_M2', 'area_gleba_m2', 'AREA_TOTAL_M2', 'area_total_m2',
+              'AREA_TOTAL', 'area_total', 'AREA_GLEBA', 'area_gleba', 'AREA_M2', 'area_m2',
+              'Área (m²)'
+            ];
+            const validated = storedLayers.map(l => {
+              const features = l.data?.features || [];
+              features.forEach(f => {
+                if (f.properties) {
+                  for (const k of areaKeys) {
+                    if (f.properties[k] !== undefined && typeof f.properties[k] === 'string') {
+                      const val = parseNumericValue(f.properties[k]);
+                      if (!isNaN(val)) {
+                        f.properties[k] = val;
                       }
                     }
-                  } else {
-                    // Fallback: create layer with metadata from config so it is never dropped
-                    const emptyGeojson: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-                    const lyr = createLayerFromGeoJson(item.nome || `Camada ${i + 1}`, emptyGeojson);
-                    if (item.visivel !== undefined) lyr.visible = Boolean(item.visivel);
-                    if (item.estilo) lyr.style = { ...lyr.style, ...item.estilo, smoothFactor: Math.min(item.estilo.smoothFactor ?? 1.5, 1.5) };
-                    if (item.opacity !== undefined) lyr.opacity = Number(item.opacity);
-                    if (item.popupTitleField) lyr.popupTitleField = item.popupTitleField;
-                    if (Array.isArray(item.popupVisibleFields)) lyr.popupVisibleFields = item.popupVisibleFields;
-                    if (Array.isArray(item.popupFieldOrder)) {
-                      lyr.popupFieldOrder = item.popupFieldOrder;
-                      lyr.propertiesSchema = item.popupFieldOrder.map(f => createDefaultPropertySchema(f));
-                    }
-                    staticLayers.push(lyr);
                   }
-                } catch (fetchErr) {
-                  console.warn(`Não foi possível processar arquivo estático ${item.arquivo}:`, fetchErr);
                 }
-              }
+              });
+              const standardSchema = getStandardSchemaForLayer(l);
+              return {
+                ...l,
+                geometryType: detectGeometryType(features),
+                featureCount: features?.length || 0,
+                propertiesSchema: standardSchema.length > 0 ? standardSchema : extractPropertySchemas(features)
+              };
+            });
+            setLayers(validated);
+            setPublishedLayers(validated);
+            setActiveLayerId(validated[0].id);
+            if (storedTime) {
+              setLastPublishedAt(storedTime);
             }
-
-            if (staticLayers?.length > 0) {
-              setLayers(staticLayers);
-              setPublishedLayers(staticLayers);
-              setActiveLayerId(staticLayers[0].id);
-              await localforage.setItem('graprohab_layers', staticLayers);
-              await localforage.setItem('graprohab_initialized', true);
-              return;
-            }
+            return;
           }
+        } catch (localErr) {
+          console.warn('Erro ao carregar fallback do localforage:', localErr);
         }
-      } catch (err) {
-        console.warn('Verificação de mapas-config.json estático:', err);
       }
 
-      // 3. Fallback to default sample
+      // 3. Fallback to default sample if both network and localforage are empty
       const defaultSample = SAMPLE_DATASETS[0]; // Empreendimentos Habitacionais GRAPROHAB - SP
       const initialLayer = createLayerFromGeoJson(defaultSample.title, defaultSample.data);
       setLayers([initialLayer]);
@@ -393,18 +430,19 @@ export default function App() {
     loadInitialLayers();
   }, [createLayerFromGeoJson]);
 
-  // Helper to persist layers
+  // Helper to persist layers locally and synchronize directly to public/data/*.geojson & public/mapas-config.json
   const persistLayers = async (layersToSave: GisLayer[]) => {
     try {
       await localforage.setItem('graprohab_layers', layersToSave);
       await localforage.setItem('graprohab_initialized', true);
       await localforage.setItem('graprohab_published_at', Date.now());
+      await syncLayersToPublicServer(layersToSave);
     } catch (e) {
       console.warn('Erro ao persistir camadas:', e);
     }
   };
 
-  // Publish changes from Gestor (draft) to Consumidor (citizen)
+  // Publish changes from Gestor (draft) to Consumidor (citizen) and sync with public server files
   const handlePublishToPublic = async () => {
     const publishedCopy = JSON.parse(JSON.stringify(layers));
     setPublishedLayers(publishedCopy);
@@ -412,13 +450,14 @@ export default function App() {
     const now = Date.now();
     setLastPublishedAt(now);
     
-    showToast('Salvando alterações...');
+    showToast('Salvando e sincronizando alterações...');
     try {
       await localforage.setItem('graprohab_layers', publishedCopy);
       await localforage.setItem('graprohab_published_at', now);
-      showToast('Camadas e dados salvos no navegador com sucesso!', 'success');
+      await syncLayersToPublicServer(publishedCopy);
+      showToast('Camadas e arquivos públicos sincronizados com sucesso!', 'success');
     } catch (e) {
-      console.error('Falha ao salvar no localforage:', e);
+      console.error('Falha ao salvar no localforage / servidor:', e);
       showToast('Erro ao salvar. Verifique o console.', 'error');
     }
   };
