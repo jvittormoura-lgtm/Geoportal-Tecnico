@@ -499,33 +499,6 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
       `;
     });
 
-    // Status badge if available
-    let statusBadge = '';
-    const sitValue = getFeatureSituacao(props) || props.status_graprohab || '';
-    if (sitValue) {
-      const normSit = normalizeSituacaoKey(sitValue);
-      let color = '#38bdf8';
-      let bg = 'rgba(56, 189, 248, 0.12)';
-      if (normSit.includes('CANCELAD') || normSit.includes('INDEFER') || normSit.includes('REVOGAD')) {
-        color = '#ef4444';
-        bg = 'rgba(239, 68, 68, 0.12)';
-      } else if (normSit.includes('APROVAD') || normSit.includes('CERTIFICAD')) {
-        color = '#10b981';
-        bg = 'rgba(16, 185, 129, 0.12)';
-      } else if (normSit.includes('ANALIS') || normSit.includes('EXIGENC') || normSit.includes('TRAMIT')) {
-        color = '#f59e0b';
-        bg = 'rgba(245, 158, 11, 0.12)';
-      } else if (normSit.includes('DISPENS')) {
-        color = '#f97316';
-        bg = 'rgba(249, 115, 22, 0.12)';
-      }
-      statusBadge = `
-        <span style="font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 9999px; background: ${bg}; color: ${color}; border: 1px solid ${color}40;">
-          ${sitValue}
-        </span>
-      `;
-    }
-
     return `
       <div style="font-family: 'Plus Jakarta Sans', system-ui, sans-serif; width: 100%; min-width: min(380px, calc(100vw - 48px)); max-width: min(460px, calc(100vw - 32px)); color: #1e293b; background: #ffffff; border-radius: 6px; overflow: hidden;">
         
@@ -535,7 +508,6 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
             <div style="font-size: 10px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; line-height: 1.3;">
               ${layer.name}
             </div>
-            ${statusBadge ? `<div>${statusBadge}</div>` : ''}
           </div>
           <div style="font-size: 15px; font-weight: 800; color: #0f172a; line-height: 1.2;">
             ${title}
@@ -707,8 +679,8 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
         return;
       }
 
-      // If vector layer already rendered and its configuration hasn't changed and order hasn't changed, KEEP IT!
-      if (existingVector && prevSignature === signature && !orderChanged) {
+      // If vector layer already rendered and its configuration hasn't changed, KEEP IT!
+      if (existingVector && prevSignature === signature) {
         return;
       }
 
@@ -825,6 +797,15 @@ const MapComponentBase: React.FC<MapComponentProps> = ({
         } catch (groupErr) {
           console.error(`Falha ao instanciar camada ${layer.name} no Leaflet:`, groupErr);
         }
+      }
+    });
+
+    // Enforce strict bottom-to-top Canvas draw and hit-test priority so top layers (Empreendimentos) always receive clicks above bottom Web layers
+    reversedLayers.forEach((layer) => {
+      if (!layer.visible) return;
+      const vecLayer = vectorLayersRef.current.get(layer.id);
+      if (vecLayer && typeof vecLayer.bringToFront === 'function') {
+        vecLayer.bringToFront();
       }
     });
   }, [layers, getFeatureStyle, createPopupContent, getLayerSignature]);
