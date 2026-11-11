@@ -78,6 +78,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       if (selectedFormat === 'github_bundle') {
         const zip = new JSZip();
         const configJson = {
+          updatedAt: Date.now(),
           camadas_fixas: [] as any[]
         };
 
@@ -105,13 +106,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           zip.file(`data/${layerFileName}`, JSON.stringify(lyr.data, null, 2));
 
           configJson.camadas_fixas.push({
+            id: lyr.id,
             nome: lyr.name,
             arquivo: `data/${layerFileName}`,
             visivel: lyr.visible,
             opacity: lyr.opacity,
+            ignoreGlobalFilter: Boolean(lyr.ignoreGlobalFilter),
             popupTitleField: lyr.popupTitleField || undefined,
             popupVisibleFields: lyr.popupVisibleFields || [],
             popupFieldOrder: lyr.popupFieldOrder || [],
+            thematic: lyr.thematic || undefined,
+            isHeatmap: lyr.isHeatmap || undefined,
             estilo: lyr.style
           });
         }
